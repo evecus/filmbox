@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FilmBox · 播放</title>
+<link rel="stylesheet" href="/app.css">
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+</head>
+<body>
+<header>
+  <div class="logo" onclick="location.href='/'" style="cursor:pointer">FilmBox<span>播放 · 瓜子源</span></div>
+  <div class="search-box">
+    <input id="kw" placeholder="搜索影视名称" onkeydown="if(event.key==='Enter')doSearch()">
+    <button onclick="doSearch()">搜索</button>
+  </div>
+</header>
+<main>
+  <!-- 阶段1：从豆瓣片名匹配瓜子源 -->
+  <div id="pick" style="display:none">
+    <div class="page-title" id="pick-title"></div>
+    <div class="grid" id="pick-grid"></div>
+    <div class="loading" id="pick-loading">正在瓜子源搜索…</div>
+  </div>
+
+  <!-- 阶段2：详情 + 播放 -->
+  <div id="player-view" style="display:none">
+    <div class="play-wrap">
+      <div>
+        <div class="player-box" id="player-box">
+          <video id="video" controls playsinline></video>
+        </div>
+        <div class="res-row" id="res-row"></div>
+        <div class="panel" style="margin-top:14px">
+          <h3 id="v-name"></h3>
+          <div class="meta-grid" id="v-meta"></div>
+          <div class="vod-content" id="v-content"></div>
+        </div>
+      </div>
+      <div class="side-panel">
+        <div class="panel">
+          <h3>选集</h3>
+          <div class="ep-list" id="ep-list"></div>
+        </div>
+        <div class="panel">
+          <h3>海报</h3>
+          <img id="v-pic" style="width:100%;border-radius:8px" alt="">
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+function doSearch() {
+  const q = document.getElementById('kw').value.trim();
+  if (q) location.href = '/search.html?q=' + encodeURIComponent(q);
+}
+function esc(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+const qs = new URLSearchParams(location.search);
+let vodId = qs.get('id') || '';
+let curSrc = qs.get('src') || 'guazi';
+const searchName = qs.get('q') || '';
+const SRC_NAMES = { guazi: '瓜子', ruyi: '如意', rebang: '热播', jianpian: '荐片' };
+let hls = null;
+
+async function init() {
+  if (vodId) { loadDetail(); return; }
+  if (searchName) {
+    // 豆瓣入口：聚合搜索全部源让用户挑选
+    document.getElementById('pick').style.display = 'block';
+    document.getElementById('pick-title').innerHTML = `“<em>${esc(searchName)}</em>” 的多源匹配`;
+    const r = await fetch(`/api/vod/search?src=all&wd=${encodeURIComponent(searchName)}`).then(x => x.json()).catch(() => null);
+    document.getElementById('pick-loading').style.display = 'none';
+    const list = (r && r.list) || [];
+    if (!list.length) {
+      document.getElementById('pick-grid').innerHTML = '<div class="empty">全部源均未找到该片，可返回首页重试或直接搜索</div>';
+      return;
+    }
+    document.getElementById('pick-grid').innerHTML = list.map(v => {
+      const src = v.source || 'guazi';
+      const tag = SRC_NAMES[src] || src;
+      return `
+      <div class="card" onclick="location.href='/play.html?src=${src}&id=${encodeURIComponent(v.vod_id)}'">
+        <div class="poster">
+          <img loading="lazy" src="/api/img?url=${encodeURIComponent(v.vod_pic)}" onerror="this.style.visibility='hidden'">
+          <span class="remarks">${esc(v.vod_remarks)}</span>
+          <span class="score" style="top:4px;right:4px;background:#2563eb">${tag}</span>
+        </div>
+        <div class="title">${esc(v.vod_name)}</div>
+      </div>`;
+    }).join('');
+  }
+}
+
+let episodes = [], curEp = 0, curRes = '';
+
+async function loadDetail() {
+  document.getElementById('player-view').style.display = 'block';
+  document.querySelector('.logo span').textContent = '播放 · ' + (SRC_NAMES[curSrc] || curSrc) + '源';
+  const url = curSrc === 'guazi'
+    ? `/api/guazi/detail?vod_id=${encodeURIComponent(vodId)}`
+    : `/api/vod/detail?src=${curSrc}&id=${encodeURIComponent(vodId)}`;
+  const r = await fetch(url).then(x => x.json()).catch(() => null);
+  if (!r || r.error) {
+    document.getElementById('v-name').textContent = '详情加载失败';
+    document.getElementById('v-content').textContent = r ? JSON.stringify(r, null, 2) : '网络请求失败（fetch 异常）';
+    console.error('detail raw:', r);
+    return;
+  }
+  const v = r.vod;
+  episodes = r.episodes || [];
+  document.title = v.vod_name + ' · FilmBox';
+  document.getElementById('v-name').textContent = v.vod_name;
+  document.getElementById('v-meta').innerHTML =
+    `<b>年份</b> ${esc(v.vod_year) || '—'} &nbsp; <b>地区</b> ${esc(v.vod_area) || '—'}<br>
+     <b>导演</b> ${esc(v.vod_director) || '—'}<br>
+     <b>主演</b> ${esc(v.vod_actor) || '—'}`;
+  document.getElementById('v-content').textContent = v.vod_content || '';
+  document.getElementById('v-pic').src = '/api/img?url=' + encodeURIComponent(v.vod_pic);
+
+  const epList = document.getElementById('ep-list');
+  epList.innerHTML = episodes.map((e, i) =>
+    `<span class="ep" data-i="${i}" onclick="playEp(${i})">${esc(e.name)}</span>`).join('');
+  if (episodes.length) playEp(0);
+}
+
+async function playEp(i) {
+  curEp = i;
+  document.querySelectorAll('.ep').forEach(el => el.classList.toggle('active', +el.dataset.i === i));
+  renderRes([]);
+  const ep = episodes[i];
+  const video = document.getElementById('video');
+  video.innerHTML = '';
+  video.poster = '';
+  video.src = '';
+  const r = curSrc === 'guazi'
+    ? await fetch(`/api/guazi/play?param=${encodeURIComponent(ep.param)}&res=${encodeURIComponent(ep.res[0] || '')}`).then(x => x.json()).catch(() => null)
+    : await fetch(`/api/vod/play?src=${curSrc}&q=${encodeURIComponent(ep.q || '')}`).then(x => x.json()).catch(() => null);
+  if (!r || r.error || !r.url) {
+    document.getElementById('player-box').innerHTML = `<div class="empty">取播放地址失败：${esc(JSON.stringify(r || '网络请求失败'))}</div>`;
+    console.error('play raw:', r);
+    return;
+  }
+  if (curSrc === 'guazi') renderRes(ep.res);
+  startPlay(r.url, r.header);
+}
+
+function renderRes(list) {
+  document.getElementById('res-row').innerHTML = list
+    .map(res => `<span class="chip" data-res="${esc(res)}" onclick="switchRes('${esc(res)}')">${esc(res)}</span>`)
+    .join('');
+}
+
+async function switchRes(res) {
+  document.querySelectorAll('#res-row .chip').forEach(el =>
+    el.classList.toggle('active', el.dataset.res === res));
+  const ep = episodes[curEp];
+  const r = await fetch(`/api/guazi/play?param=${encodeURIComponent(ep.param)}&res=${encodeURIComponent(res)}`)
+    .then(x => x.json()).catch(() => null);
+  if (r && r.url) startPlay(r.url, r.header);
+}
+
+function startPlay(url, header) {
+  const video = document.getElementById('video');
+  destroyHls();
+  const h = header || {};
+  let proxied = '/api/stream?url=' + encodeURIComponent(url);
+  if (h['User-Agent']) proxied += '&ua=' + encodeURIComponent(h['User-Agent']);
+  if (h['Referer']) proxied += '&referer=' + encodeURIComponent(h['Referer']);
+  if (url.includes('.m3u8')) {
+    if (window.Hls && Hls.isSupported()) {
+      hls = new Hls({ maxBufferLength: 30 });
+      hls.loadSource(proxied);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        if (data.fatal) { destroyHls(); video.src = proxied; }
+      });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = proxied;
+    } else {
+      document.getElementById('player-box').innerHTML = '<div class="empty">当前浏览器不支持 HLS 播放</div>';
+    }
+  } else {
+    video.src = proxied;
+  }
+  video.play().catch(() => {});
+}
+
+function destroyHls() { if (hls) { hls.destroy(); hls = null; } }
+
+if (vodId) loadDetail(); else init();
+</script>
+</body>
+</html>

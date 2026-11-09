@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FilmBox · 搜索</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header>
+  <div class="logo" onclick="location.href='/'" style="cursor:pointer">FilmBox<span>搜索 · 多源</span></div>
+  <div class="search-box">
+    <input id="kw" placeholder="搜索影视名称" onkeydown="if(event.key==='Enter')doSearch()">
+    <button onclick="doSearch()">搜索</button>
+  </div>
+</header>
+<main>
+  <div class="filter-row" style="margin-bottom:10px" id="src-row">
+    <span class="label">来源</span>
+    <span class="chip active" data-src="all" onclick="switchSrc('all')">全部</span>
+    <span class="chip" data-src="guazi" onclick="switchSrc('guazi')">瓜子</span>
+    <span class="chip" data-src="ruyi" onclick="switchSrc('ruyi')">如意</span>
+    <span class="chip" data-src="rebang" onclick="switchSrc('rebang')">热播</span>
+    <span class="chip" data-src="jianpian" onclick="switchSrc('jianpian')">荐片</span>
+  </div>
+  <div class="page-title" id="title"></div>
+  <div class="grid" id="grid"></div>
+  <div class="loading" id="loading">搜索中…</div>
+  <div class="pager" id="pager" style="display:none">
+    <button id="prev" onclick="go(-1)">上一页</button>
+    <button id="next" onclick="go(1)">下一页</button>
+  </div>
+</main>
+
+<script>
+let page = 1, pagecount = 1, curSrc = 'all';
+const SRC_NAMES = { guazi: '瓜子', ruyi: '如意', rebang: '热播', jianpian: '荐片' };
+
+function switchSrc(s) {
+  curSrc = s;
+  document.querySelectorAll('#src-row .chip').forEach(el => el.classList.toggle('active', el.dataset.src === s));
+  const q = document.getElementById('kw').value.trim();
+  if (q) load(q, 1);
+}
+
+function doSearch() {
+  const q = document.getElementById('kw').value.trim();
+  if (q) location.href = '/search.html?q=' + encodeURIComponent(q) + '&src=' + curSrc;
+}
+function go(d) {
+  page = Math.min(Math.max(page + d, 1), pagecount);
+  const p = new URLSearchParams(location.search);
+  load(p.get('q') || '', page); window.scrollTo(0, 0);
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+async function load(q, p) {
+  const loading = document.getElementById('loading');
+  const grid = document.getElementById('grid');
+  loading.style.display = 'block';
+  grid.innerHTML = '';
+  const srcLabel = curSrc === 'all' ? '全部源' : (SRC_NAMES[curSrc] || curSrc) + '源';
+  document.getElementById('title').innerHTML = `“<em>${esc(q)}</em>” 的搜索结果（${srcLabel}）`;
+  const r = await fetch(`/api/vod/search?src=${curSrc}&wd=${encodeURIComponent(q)}&page=${p}`).then(x => x.json()).catch(() => null);
+  loading.style.display = 'none';
+  if (!r || r.ok === false) { grid.innerHTML = `<div class="empty">搜索失败：${esc(r && r.error || '网络错误')}</div>`; return; }
+  if (r.errors && r.errors.length && curSrc === 'all') {
+    console.warn('部分源失败:', r.errors);
+    grid.innerHTML += `<div class="empty" style="grid-column:1/-1;opacity:.7">部分源暂不可用：${esc(r.errors.join('；'))}</div>`;
+  }
+  pagecount = r.pagecount || 1;
+  const list = r.list || [];
+  if (!list.length) { grid.innerHTML = '<div class="empty">没有找到相关结果</div>'; document.getElementById('pager').style.display = 'none'; return; }
+  grid.innerHTML = list.map(v => {
+    const src = v.source || 'guazi';
+    const tag = SRC_NAMES[src] || src;
+    return `
+    <div class="card" onclick="location.href='/play.html?src=${src}&id=${encodeURIComponent(v.vod_id)}'">
+      <div class="poster">
+        <img loading="lazy" src="/api/img?url=${encodeURIComponent(v.vod_pic)}" alt="" onerror="this.style.visibility='hidden'">
+        <span class="remarks">${esc(v.vod_remarks)}</span>
+        <span class="score" style="top:4px;right:4px;background:#2563eb">${tag}</span>
+      </div>
+      <div class="title" title="${esc(v.vod_name)}">${esc(v.vod_name)}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('pager').style.display = 'flex';
+  document.getElementById('prev').disabled = p <= 1;
+  document.getElementById('next').disabled = p >= pagecount;
+}
+
+const _p = new URLSearchParams(location.search);
+const q = _p.get('q') || '';
+if (_p.get('src')) {
+  curSrc = _p.get('src');
+  document.querySelectorAll('#src-row .chip').forEach(el => el.classList.toggle('active', el.dataset.src === curSrc));
+}
+document.getElementById('kw').value = q;
+if (q) load(q, 1); else document.getElementById('loading').style.display = 'none';
+</script>
+</body>
+</html>

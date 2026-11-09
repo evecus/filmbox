@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FilmBox · 豆瓣推荐</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header>
+  <div class="logo">FilmBox<span>豆瓣推荐 · 瓜子片源</span></div>
+  <nav id="nav"></nav>
+  <div class="search-box">
+    <input id="kw" placeholder="搜索影视（瓜子源）" onkeydown="if(event.key==='Enter')doSearch()">
+    <button onclick="doSearch()">搜索</button>
+  </div>
+</header>
+<main>
+  <div class="banner" id="banner"></div>
+  <div class="filter-bar" id="filters"></div>
+  <div class="grid" id="grid"></div>
+  <div class="loading" id="loading">加载中…</div>
+  <div class="pager" id="pager" style="display:none">
+    <button id="prev" onclick="go(-1)">上一页</button>
+    <button id="next" onclick="go(1)">下一页</button>
+  </div>
+</main>
+
+<script>
+const state = { cat: 'tv', page: 1, pagecount: 1, filters: {}, filtersDef: {}, classes: [] };
+
+function doSearch() {
+  const q = document.getElementById('kw').value.trim();
+  if (q) location.href = '/search.html?q=' + encodeURIComponent(q);
+}
+
+async function init() {
+  const r = await fetch('/api/douban/home').then(x => x.json()).catch(() => null);
+  if (!r) { document.getElementById('loading').textContent = '首页数据加载失败'; return; }
+  state.classes = r.class || [];
+  state.filtersDef = r.filters || {};
+
+  renderBanner(r.banner || []);
+  renderNav();
+  renderFilterBar('tv');
+  renderList(r.list || [], 1);
+}
+
+function renderBanner(items) {
+  const el = document.getElementById('banner');
+  if (!items.length) { el.style.display = 'none'; return; }
+  const b = items[0];
+  el.innerHTML = `<img src="/api/img?url=${encodeURIComponent(b.backgroundImage)}" alt="">
+    <div class="banner-info">
+      <h2>${esc(b.title)}</h2>
+      <p>${esc([b.genre, b.actors, b.description].filter(Boolean).join(' · '))}</p>
+    </div>`;
+}
+
+function renderNav() {
+  document.getElementById('nav').innerHTML = state.classes
+    .map(c => `<a data-id="${c.type_id}" onclick="switchCat('${c.type_id}')">${c.type_name}</a>`).join('');
+  markActive();
+}
+
+function markActive() {
+  document.querySelectorAll('#nav a').forEach(a =>
+    a.classList.toggle('active', a.dataset.id === state.cat));
+}
+
+function switchCat(id) {
+  state.cat = id; state.page = 1; state.filters = {};
+  markActive(); renderFilterBar(id); load();
+}
+
+function renderFilterBar(cat) {
+  const defs = state.filtersDef[cat] || [];
+  document.getElementById('filters').innerHTML = defs.map(f => {
+    const cur = state.filters[f.key] !== undefined ? state.filters[f.key] : f.init;
+    return `<div class="filter-row"><span class="label">${f.name}</span>` +
+      f.value.map(v =>
+        `<span class="chip ${cur === v.value ? 'active' : ''}" onclick="setFilter('${f.key}','${esc(v.value)}')">${v.name}</span>`
+      ).join('') + '</div>';
+  }).join('');
+}
+
+function setFilter(key, val) {
+  state.filters[key] = val;
+  state.page = 1;
+  renderFilterBar(state.cat);
+  load();
+}
+
+function go(d) { state.page = Math.min(Math.max(state.page + d, 1), state.pagecount); load(); window.scrollTo(0, 0); }
+
+async function load() {
+  const loading = document.getElementById('loading');
+  loading.style.display = 'block';
+  document.getElementById('grid').innerHTML = '';
+  const fs = encodeURIComponent(JSON.stringify(state.filters));
+  const r = await fetch(`/api/douban/category?cat=${state.cat}&page=${state.page}&filters=${fs}`)
+    .then(x => x.json()).catch(() => null);
+  loading.style.display = 'none';
+  if (!r) return;
+  renderList(r.list || [], r.pagecount || 1);
+}
+
+function renderList(list, pagecount) {
+  state.pagecount = pagecount;
+  const grid = document.getElementById('grid');
+  const pager = document.getElementById('pager');
+  if (!list.length) { grid.innerHTML = '<div class="empty">暂无数据</div>'; pager.style.display = 'none'; return; }
+  grid.innerHTML = list.map(v => `
+    <div class="card" onclick="location.href='/play.html?q=${encodeURIComponent(v.vod_name)}'">
+      <div class="poster">
+        <img loading="lazy" src="${v.vod_pic}" alt="" onerror="this.style.visibility='hidden'">
+        ${v.vod_douban_score ? `<span class="score">${v.vod_douban_score}</span>` : ''}
+        ${v.vod_remarks ? `<span class="remarks">${esc(v.vod_remarks)}</span>` : ''}
+      </div>
+      <div class="title" title="${esc(v.vod_name)}">${esc(v.vod_name)}</div>
+      <div class="subtitle">${esc([v.vod_year, v.vod_subtitle].filter(Boolean).join(' · '))}</div>
+    </div>`).join('');
+  pager.style.display = 'flex';
+  document.getElementById('prev').disabled = state.page <= 1;
+  document.getElementById('next').disabled = state.page >= state.pagecount;
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+init();
+</script>
+</body>
+</html>

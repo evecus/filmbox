@@ -1,0 +1,27 @@
+[package]
+name = "filmbox"
+version = "0.1.0"
+edition = "2021"
+description = "纯 Rust 影视站：豆瓣做首页推荐，瓜子做搜索与播放源，内置网页面板"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "brotli", "deflate", "stream", "json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc", "block-padding"] }
+md-5 = "0.10"
+rsa = "0.9"
+base64 = "0.22"
+hex = "0.4"
+urlencoding = "2"
+rand = "0.8"
+anyhow = "1"
+
+[dev-dependencies]
+
+[profile.release]
+opt-level = 2
+strip = true
